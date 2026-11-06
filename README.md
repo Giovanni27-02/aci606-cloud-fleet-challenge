@@ -1,3 +1,11 @@
+## Despliegue PaaS - Ejercicio 4
+- **URL Pública del Servicio:** https://aci606-cloud-fleet-challenge-i48t.onrender.com
+- **Plataforma de Cómputo:** Render (Web Service PaaS, Python 3 con Uvicorn)
+- **Persistencia:** PostgreSQL gestionado en Neon
+- **Dashboard Operacional:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/dashboard
+- **Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
+
+
 # ACI606 - Cloud Fleet Challenge
 
 Starter repository for **Exercise 4** of ACI606 Cloud Computing.
