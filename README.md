@@ -6,6 +6,12 @@
 - **Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
 
 
+
+## Entrega - Despliegue PaaS (Render + Neon)
+- **API Base:** https://aci606-cloud-fleet-challenge-i48t.onrender.com
+- **Dashboard:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/dashboard
+- **Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
+
 # ACI606 - Cloud Fleet Challenge
 
 Starter repository for **Exercise 4** of ACI606 Cloud Computing.
