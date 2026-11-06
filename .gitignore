@@ -21,3 +21,5 @@ data/*.csv
 # OS / editor
 .DS_Store
 .vscode/
+
+# Permitir artefacto de ML

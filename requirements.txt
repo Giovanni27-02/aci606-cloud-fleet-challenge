@@ -1,7 +1,11 @@
 fastapi
 uvicorn[standard]
-requests
-numpy
-pandas
 scikit-learn
 joblib
+pandas
+numpy
+requests
+pydantic
+sqlalchemy>=2.0
+psycopg[binary]
+jinja2
