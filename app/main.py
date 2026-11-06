@@ -1,19 +1,68 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+import joblib
+import numpy as np
+import pandas as pd
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
+
+from app.db import TelemetryRecord, get_db, init_db
+
+# 1. Inicializar tablas en la base de datos
+init_db()
 
 app = FastAPI(
     title="ACI606 Cloud Fleet Challenge",
-    version="0.1.0-starter",
-    description="Starter API for the ACI606 Cloud Fleet Challenge.",
+    version="1.0.0",
+    description="Servicio Cloud persistente con inferencia remota para flotas de robots.",
 )
+
+# 2. Cargar artefacto del modelo
+MODEL_PATH = Path(os.environ.get("MODEL_PATH", "models/model.joblib"))
+if MODEL_PATH.exists():
+    model = joblib.load(MODEL_PATH)
+    MODEL_LOADED = True
+else:
+    model = None
+    MODEL_LOADED = False
+
+# 3. Métricas operacionales en memoria del proceso
+START_TIME = time.time()
+METRICS = {
+    "requests_total": 0,
+    "status_2xx": 0,
+    "status_4xx": 0,
+    "status_5xx": 0,
+    "predictions_total": 0,
+    "inference_latencies_ms": [],
+}
+
+
+@app.middleware("http")
+async def track_metrics_middleware(request: Request, call_next):
+    METRICS["requests_total"] += 1
+    try:
+        response: Response = await call_next(request)
+        if 200 <= response.status_code < 300:
+            METRICS["status_2xx"] += 1
+        elif 400 <= response.status_code < 500:
+            METRICS["status_4xx"] += 1
+        elif response.status_code >= 500:
+            METRICS["status_5xx"] += 1
+        return response
+    except Exception:
+        METRICS["status_5xx"] += 1
+        raise
+
 
 Status = Literal["NORMAL", "WARNING", "CRITICAL"]
 
@@ -35,68 +84,192 @@ class PredictionRequest(Telemetry):
     pass
 
 
-# Starter storage: intentionally volatile.
-# Students must replace this with persistent storage for the final challenge.
-LATEST: dict[str, Telemetry] = {}
-HISTORY: dict[str, deque[Telemetry]] = defaultdict(lambda: deque(maxlen=100))
-REQUEST_COUNT = 0
+class PredictionResponse(BaseModel):
+    robot_id: str
+    predicted_status: Status
+    confidence: float
+    model_version: str
+    inference_ms: float
 
 
 @app.get("/health")
-def health() -> dict:
+def health(db: Session = Depends(get_db)) -> dict:
+    total_records = db.query(TelemetryRecord).count()
     return {
         "status": "ok",
         "service": "aci606-cloud-fleet",
         "version": app.version,
-        "robots_in_memory": len(LATEST),
+        "model_loaded": MODEL_LOADED,
+        "total_records_db": total_records,
         "utc": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @app.post("/telemetry")
-def ingest_telemetry(sample: Telemetry) -> dict:
-    global REQUEST_COUNT
-    REQUEST_COUNT += 1
-    LATEST[sample.robot_id] = sample
-    HISTORY[sample.robot_id].append(sample)
+def ingest_telemetry(sample: Telemetry, db: Session = Depends(get_db)) -> dict:
+    record = TelemetryRecord(
+        robot_id=sample.robot_id,
+        timestamp=sample.timestamp,
+        x=sample.x,
+        y=sample.y,
+        speed=sample.speed,
+        battery=sample.battery,
+        motor_temp=sample.motor_temp,
+        vibration=sample.vibration,
+        motor_current=sample.motor_current,
+        obstacle_distance=sample.obstacle_distance,
+    )
+    db.add(record)
+    db.commit()
     return {
         "accepted": True,
         "robot_id": sample.robot_id,
         "server_time": datetime.now(timezone.utc).isoformat(),
-        "note": "Starter mode: data is stored only in RAM.",
+        "persistence": "POSTGRESQL",
     }
 
 
 @app.get("/robots")
-def list_robots() -> list[dict]:
-    return [sample.model_dump() for sample in LATEST.values()]
+def list_robots(db: Session = Depends(get_db)) -> list[dict]:
+    # Obtener el id del registro más reciente para cada robot
+    subquery = (
+        db.query(
+            TelemetryRecord.robot_id,
+            func.max(TelemetryRecord.timestamp).label("max_ts"),
+        )
+        .group_by(TelemetryRecord.robot_id)
+        .subquery()
+    )
+
+    records = (
+        db.query(TelemetryRecord)
+        .join(
+            subquery,
+            (TelemetryRecord.robot_id == subquery.c.robot_id)
+            & (TelemetryRecord.timestamp == subquery.c.max_ts),
+        )
+        .all()
+    )
+
+    return [
+        {
+            "robot_id": r.robot_id,
+            "timestamp": r.timestamp,
+            "x": r.x,
+            "y": r.y,
+            "speed": r.speed,
+            "battery": r.battery,
+            "motor_temp": r.motor_temp,
+            "vibration": r.vibration,
+            "motor_current": r.motor_current,
+            "obstacle_distance": r.obstacle_distance,
+        }
+        for r in records
+    ]
 
 
 @app.get("/robots/{robot_id}/history")
-def robot_history(robot_id: str) -> list[dict]:
-    if robot_id not in HISTORY:
-        raise HTTPException(status_code=404, detail="Robot not found")
-    return [sample.model_dump() for sample in HISTORY[robot_id]]
-
-
-@app.post("/predict")
-def predict(_: PredictionRequest) -> dict:
-    # TODO E4: load the trained model and return a real prediction.
-    # Required contract is documented in README.md and the student guide.
-    raise HTTPException(
-        status_code=501,
-        detail="/predict is part of the challenge. Train and integrate your model.",
+def robot_history(robot_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    records = (
+        db.query(TelemetryRecord)
+        .filter(TelemetryRecord.robot_id == robot_id)
+        .order_by(TelemetryRecord.timestamp.asc())
+        .all()
     )
+    if not records:
+        raise HTTPException(status_code=404, detail="Robot not found")
+
+    return [
+        {
+            "robot_id": r.robot_id,
+            "timestamp": r.timestamp,
+            "x": r.x,
+            "y": r.y,
+            "speed": r.speed,
+            "battery": r.battery,
+            "motor_temp": r.motor_temp,
+            "vibration": r.vibration,
+            "motor_current": r.motor_current,
+            "obstacle_distance": r.obstacle_distance,
+        }
+        for r in records
+    ]
+
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict(data: PredictionRequest) -> dict:
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Modelo de predicción no disponible o no inicializado.",
+        )
+
+    features_df = pd.DataFrame(
+        [
+            {
+                "speed": data.speed,
+                "battery": data.battery,
+                "motor_temp": data.motor_temp,
+                "vibration": data.vibration,
+                "motor_current": data.motor_current,
+                "obstacle_distance": data.obstacle_distance,
+            }
+        ]
+    )
+
+    t0 = time.perf_counter()
+    predicted_class = str(model.predict(features_df)[0])
+    probabilities = model.predict_proba(features_df)[0]
+    t1 = time.perf_counter()
+
+    inference_ms = round((t1 - t0) * 1000, 2)
+    confidence = float(np.max(probabilities))
+
+    METRICS["predictions_total"] += 1
+    METRICS["inference_latencies_ms"].append(inference_ms)
+
+    return {
+        "robot_id": data.robot_id,
+        "predicted_status": predicted_class,
+        "confidence": round(confidence, 4),
+        "model_version": "v1",
+        "inference_ms": inference_ms,
+    }
 
 
 @app.get("/metrics")
-def metrics() -> dict:
-    # TODO E4: extend with latency, errors, throughput and model metrics.
+def metrics(db: Session = Depends(get_db)) -> dict:
+    uptime_seconds = int(time.time() - START_TIME)
+    latencies = METRICS["inference_latencies_ms"]
+
+    p50 = float(np.percentile(latencies, 50)) if latencies else 0.0
+    p95 = float(np.percentile(latencies, 95)) if latencies else 0.0
+    mean_lat = float(np.mean(latencies)) if latencies else 0.0
+
+    robots_count = (
+        db.query(func.count(func.distinct(TelemetryRecord.robot_id))).scalar() or 0
+    )
+    total_telemetry = db.query(func.count(TelemetryRecord.id)).scalar() or 0
+
     return {
-        "requests_received": REQUEST_COUNT,
-        "robots_in_memory": len(LATEST),
-        "persistence": "RAM_ONLY",
-        "prediction_service": "NOT_IMPLEMENTED",
+        "uptime_seconds": uptime_seconds,
+        "requests_total": METRICS["requests_total"],
+        "status_codes": {
+            "2xx": METRICS["status_2xx"],
+            "4xx": METRICS["status_4xx"],
+            "5xx": METRICS["status_5xx"],
+        },
+        "predictions": {
+            "total": METRICS["predictions_total"],
+            "latency_p50_ms": round(p50, 2),
+            "latency_p95_ms": round(p95, 2),
+            "latency_mean_ms": round(mean_lat, 2),
+        },
+        "database": {
+            "persistence": "POSTGRESQL",
+            "robots_tracked": robots_count,
+            "total_samples": total_telemetry,
+        },
     }
 
 
