@@ -2,7 +2,10 @@ import os
 from sqlalchemy import create_engine, Column, Integer, String, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.environ.get("postgresql://neondb_owner:npg_Lr0qZben3Aym@ep-purple-union-beddc5qe-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_Lr0qZben3Aym@ep-purple-union-beddc5qe-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+)
 
 # Si no hay variable de entorno (desarrollo local), usa SQLite como fallback temporal
 if not DATABASE_URL:
