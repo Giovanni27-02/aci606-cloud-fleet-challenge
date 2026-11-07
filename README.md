@@ -1,17 +1,15 @@
-## Despliegue PaaS - Ejercicio 4
-- **URL Pública del Servicio:** https://aci606-cloud-fleet-challenge-i48t.onrender.com
-- **Plataforma de Cómputo:** Render (Web Service PaaS, Python 3 con Uvicorn)
-- **Persistencia:** PostgreSQL gestionado en Neon
-- **Dashboard Operacional:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/dashboard
-- **Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
+## Despliegue en Producción (Cloud Fleet Challenge)
 
-
-
-## Entrega - Despliegue PaaS (Render + Neon)
 - **API Base:** https://aci606-cloud-fleet-challenge-i48t.onrender.com
-- **Dashboard:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/dashboard
-- **Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
+- **Dashboard Operativo:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/dashboard
+- **Endpoint de Métricas:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/metrics
+- **Documentación Swagger:** https://aci606-cloud-fleet-challenge-i48t.onrender.com/docs
 
+### Arquitectura
+- **Backend:** FastAPI (Python 3) con endpoints asíncronos y recolección de métricas operacionales.
+- **Base de Datos:** PostgreSQL administrado en Neon Serverless, persistiendo telemetría e historial de robots.
+- **PaaS:** Render (Web Service con auto-deploy).
+- **Simulación:** Generador multi-robot continuo mediante `simulator/fleet_simulator.py`.
 # ACI606 - Cloud Fleet Challenge
 
 Starter repository for **Exercise 4** of ACI606 Cloud Computing.
